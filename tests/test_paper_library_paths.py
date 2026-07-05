@@ -31,7 +31,7 @@ class PaperLibraryPathTests(unittest.TestCase):
 
     def test_resolve_paper_dir_uses_arxiv_id_and_sanitized_title(self):
         with tempfile.TemporaryDirectory() as tmp:
-            resolved = download.resolve_paper_dir(str(tmp), "2501.12948v2", "A/B: Test Paper")
+            resolved = download.resolve_paper_dir(str(tmp), "2501.12948v2", "A/B: 🤖 Test Paper")
 
             self.assertEqual(Path(resolved).name, "2501.12948v2 - A-B_ Test Paper")
 

@@ -21,6 +21,16 @@ import xml.etree.ElementTree as ET
 
 
 DOWNLOAD_ENV = "download.env"
+_INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"|?*]')
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F1E6-\U0001F1FF"
+    "\U0001F300-\U0001FAFF"
+    "\u2600-\u27BF"
+    "\u200d"
+    "\ufe0f"
+    "]"
+)
 
 
 def extract_tar_archive(tf, work_dir):
@@ -162,8 +172,9 @@ def pdf_name_from_title(title, fallback, max_len=240):
     s = " ".join(str(title).split())
     s = s.replace("\x00", "")
     s = s.replace("/", "-").replace("\\", "-")
-    for ch in '<>:"|?*':
-        s = s.replace(ch, "_")
+    s = _INVALID_FILENAME_CHARS_RE.sub("_", s)
+    s = _EMOJI_RE.sub("", s)
+    s = " ".join(s.split())
     s = s.strip().rstrip(".")
     if not s:
         return fallback

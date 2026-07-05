@@ -120,6 +120,8 @@ python3 {SKILL_DIR}/scripts/compile.py paper "$PAPER_DIR"
 
 编译失败时：读取 stderr 中的错误日志，参考 `references/compile-errors.md` 修复源码，重新编译（最多重试 2 次）。
 
+命名 PDF 前必须检查最终文件名和路径各级名称，不得包含 `\ / : * ? " < > |` 或表情符号。
+
 编译产物若仍是 `download.env` 中的无后缀 `PDF_PATH`，编译成功后立即将其移动/重命名为 `$PAPER_DIR/<单篇文献目录名>.zh.pdf`。同时下载英文原版 PDF 到 `$PAPER_DIR/<单篇文献目录名>.en.pdf`；如果该英文 PDF 已存在，不要覆盖，除非用户明确要求刷新。
 
 编译成功后默认保留 `$PAPER_DIR/.tmp_arxiv`，方便检查 PDF 后继续微调。确认 PDF 可用且不再需要源码时，调用：

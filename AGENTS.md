@@ -7,6 +7,7 @@
 - `arxiv-translator/SKILL.md`：Skill 主入口，定义论文下载、翻译、自检、编译流程。
 - `arxiv-translator/scripts/`：Python 工具脚本，包括 `download.py`、`inspect_tex.py`、`compile.py`、`cleanup.py`。
 - `arxiv-translator/references/`：排障参考文档，例如编译错误处理。
+- `tests/`：离线单元测试，覆盖脚本的路径管理和元数据行为。
 - `images/`：README 中使用的安装与效果截图。
 - `README.md`：面向用户的安装、使用说明和项目介绍。
 
@@ -15,10 +16,16 @@
 本项目没有传统构建步骤；开发重点是验证脚本和 Skill 流程。
 
 ```bash
-python3 -m py_compile arxiv-translator/scripts/*.py
+python3 -c 'import ast, pathlib; [ast.parse(p.read_text(encoding="utf-8"), filename=str(p)) for p in pathlib.Path("arxiv-translator/scripts").glob("*.py")]'
 ```
 
-检查所有 Python 脚本是否存在语法错误。
+检查所有 Python 脚本是否存在语法错误，且不会改动已跟踪的 `__pycache__`。
+
+```bash
+python3 -m unittest tests/test_paper_library_paths.py
+```
+
+运行离线单元测试，验证论文库目录、`download.env` 和按单篇目录编译参数。
 
 ```bash
 python3 arxiv-translator/scripts/download.py 1706.03762 /tmp/arxiv-test
@@ -38,7 +45,7 @@ Python 脚本使用 4 空格缩进，函数和变量采用 `snake_case`，常量
 
 ## 测试指南
 
-当前没有单元测试框架或覆盖率门槛。修改脚本后至少运行 `py_compile`，并用一个小型 arXiv ID 做下载、自检或编译 smoke test。涉及 LaTeX 处理、引用内联、中文字体注入时，应验证真实源码目录，而不只检查单个字符串。
+当前使用 Python `unittest`，暂无覆盖率门槛。修改脚本后至少运行 AST 语法检查和 `python3 -m unittest tests/test_paper_library_paths.py`，并在涉及下载、编译或 LaTeX 处理时用一个小型 arXiv ID 做 smoke test。涉及引用内联、中文字体注入时，应验证真实源码目录，而不只检查单个字符串。
 
 ## 提交与 Pull Request 指南
 

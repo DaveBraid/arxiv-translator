@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
 Download arXiv e-print, extract, pick main .tex, fetch paper title (PDF basename).
-Usage: python download.py <paper_id> <work_dir>
+Usage:
+  python download.py <paper_id> <work_dir>
+  python download.py --library-dir <library_dir> <paper_id>
 
-stdout: three lines — WORK_DIR='…' MAIN_TEX='…' PDF_NAME='…'
+stdout: shell assignments including WORK_DIR, MAIN_TEX, PDF_NAME, and
+library-mode PAPER_DIR/PDF_PATH.
 """
 import gzip
 import html
@@ -15,6 +18,9 @@ import tarfile
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+
+
+DOWNLOAD_ENV = "download.env"
 
 
 def extract_tar_archive(tf, work_dir):
@@ -156,9 +162,8 @@ def pdf_name_from_title(title, fallback, max_len=240):
     s = " ".join(str(title).split())
     s = s.replace("\x00", "")
     s = s.replace("/", "-").replace("\\", "-")
-    if os.name == "nt":
-        for ch in '<>:"|?*':
-            s = s.replace(ch, "_")
+    for ch in '<>:"|?*':
+        s = s.replace(ch, "_")
     s = s.strip().rstrip(".")
     if not s:
         return fallback
@@ -167,22 +172,111 @@ def pdf_name_from_title(title, fallback, max_len=240):
     return s
 
 
+def paper_dir_name(paper_id, pdf_name):
+    title = pdf_name_from_title(pdf_name, "paper", max_len=220)
+    return f"{paper_id} - {title}"
+
+
+def resolve_paper_dir(library_dir, paper_id, pdf_name):
+    """Return the single-paper directory, reusing an existing arXiv-id prefix."""
+    library_dir = os.path.abspath(os.path.expanduser(library_dir or "."))
+    os.makedirs(library_dir, exist_ok=True)
+    prefix = f"{paper_id} - "
+    try:
+        entries = sorted(os.listdir(library_dir))
+    except OSError:
+        entries = []
+    for entry in entries:
+        path = os.path.join(library_dir, entry)
+        if os.path.isdir(path) and (entry == paper_id or entry.startswith(prefix)):
+            return path
+    return os.path.join(library_dir, paper_dir_name(paper_id, pdf_name))
+
+
+def _path_for_env(path, paper_dir):
+    path = os.path.abspath(path)
+    paper_dir = os.path.abspath(paper_dir)
+    rel = os.path.relpath(path, paper_dir)
+    if rel == ".":
+        return "."
+    if rel.startswith("..") or os.path.isabs(rel):
+        return path
+    if os.name == "nt":
+        rel = rel.replace("\\", "/")
+    return rel
+
+
+def write_download_env(paper_dir, paper_id, work_dir, main_tex, pdf_name):
+    """Persist per-paper metadata so later commands can target only this folder."""
+    os.makedirs(paper_dir, exist_ok=True)
+    pdf_path = os.path.join(paper_dir, os.path.basename(os.path.abspath(paper_dir)) + ".pdf")
+    env_path = os.path.join(paper_dir, DOWNLOAD_ENV)
+    lines = [
+        _sh_var_assign("PAPER_ID", paper_id),
+        _sh_var_assign("WORK_DIR", _path_for_env(work_dir, paper_dir)),
+        _sh_var_assign("MAIN_TEX", main_tex),
+        _sh_var_assign("PDF_NAME", pdf_name),
+        _sh_var_assign("PDF_PATH", _path_for_env(pdf_path, paper_dir)),
+    ]
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return env_path
+
+
 def _sh_var_assign(name, value):
     esc = str(value).replace("'", "'\\''")
     return f"{name}='{esc}'"
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python download.py <paper_id> <work_dir>", file=sys.stderr)
-        sys.exit(2)
-    paper_id, work_dir = sys.argv[1], sys.argv[2]
+def _print_download_vars(work_dir, main_tex, pdf_name, paper_dir=None, pdf_path=None):
+    print(_sh_var_assign("WORK_DIR", os.path.abspath(work_dir)))
+    print(_sh_var_assign("MAIN_TEX", main_tex))
+    print(_sh_var_assign("PDF_NAME", pdf_name))
+    if paper_dir:
+        print(_sh_var_assign("PAPER_DIR", os.path.abspath(paper_dir)))
+    if pdf_path:
+        print(_sh_var_assign("PDF_PATH", os.path.abspath(pdf_path)))
+
+
+def _download_to_work_dir(paper_id, work_dir):
     tex_files = download_and_extract(paper_id, work_dir)
     rel_path, _ = find_main_tex(work_dir, tex_files)
     rel_path = rel_path.replace("\\", "/")
     fallback = os.path.splitext(os.path.basename(rel_path))[0]
     pdf_name = pdf_name_from_title(fetch_arxiv_title(paper_id), fallback)
+    return rel_path, pdf_name
 
-    print(_sh_var_assign("WORK_DIR", os.path.abspath(work_dir)))
-    print(_sh_var_assign("MAIN_TEX", rel_path))
-    print(_sh_var_assign("PDF_NAME", pdf_name))
+
+def _download_to_library(paper_id, library_dir):
+    pdf_name = pdf_name_from_title(fetch_arxiv_title(paper_id), paper_id)
+    paper_dir = resolve_paper_dir(library_dir, paper_id, pdf_name)
+    work_dir = os.path.join(paper_dir, ".tmp_arxiv", paper_id)
+    main_tex, pdf_name = _download_to_work_dir(paper_id, work_dir)
+    env_path = write_download_env(paper_dir, paper_id, work_dir, main_tex, pdf_name)
+    pdf_path = os.path.join(paper_dir, os.path.basename(os.path.abspath(paper_dir)) + ".pdf")
+    return paper_dir, work_dir, main_tex, pdf_name, pdf_path, env_path
+
+
+def main(argv):
+    if len(argv) == 2:
+        paper_id, work_dir = argv
+        main_tex, pdf_name = _download_to_work_dir(paper_id, work_dir)
+        _print_download_vars(work_dir, main_tex, pdf_name)
+        return 0
+
+    if len(argv) == 3 and argv[0] == "--library-dir":
+        library_dir, paper_id = argv[1], argv[2]
+        paper_dir, work_dir, main_tex, pdf_name, pdf_path, _ = _download_to_library(paper_id, library_dir)
+        _print_download_vars(work_dir, main_tex, pdf_name, paper_dir, pdf_path)
+        return 0
+
+    print(
+        "Usage: python download.py <paper_id> <work_dir>\n"
+        "   or: python download.py --library-dir <library_dir> <paper_id>",
+        file=sys.stderr,
+    )
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

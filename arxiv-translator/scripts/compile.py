@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Submit a LaTeX project to latex-on-http for compilation.
-Usage: python compile.py <work_dir> <main_tex> <output_pdf_path>
+Usage:
+  python compile.py <work_dir> <main_tex> <output_pdf_path>
+  python compile.py paper <paper_dir>
 
 main_tex: path relative to work_dir (e.g. ms.tex), or absolute path to the main file.
 output_pdf_path: full path for the output PDF; if an existing directory is passed, write <main_basename>.pdf there.
@@ -9,6 +11,7 @@ output_pdf_path: full path for the output PDF; if an existing directory is passe
 import base64
 import os
 import re
+import shlex
 import sys
 
 import requests
@@ -60,7 +63,8 @@ _BUILD_ARTIFACT_EXTS = (
     ".dvi",
     ".ps",
 )
-_SKIP_FILENAMES = {"download.env"}
+DOWNLOAD_ENV = "download.env"
+_SKIP_FILENAMES = {DOWNLOAD_ENV}
 _INLINED_BBL_MARKER = "% arxiv-translator: inlined prebuilt .bbl"
 _AUTO_CJK_PREAMBLE = "\n".join(
     (
@@ -89,6 +93,54 @@ def encode(path):
 def _read_text(path):
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         return f.read()
+
+
+def _read_download_env(paper_dir):
+    env_path = os.path.join(os.path.abspath(paper_dir), DOWNLOAD_ENV)
+    values = {}
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError as exc:
+        print(f"Error: cannot read {env_path}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            parts = shlex.split(line, posix=True)
+        except ValueError as exc:
+            print(f"Error: invalid {DOWNLOAD_ENV} line: {line}\n{exc}", file=sys.stderr)
+            sys.exit(1)
+        if len(parts) != 1 or "=" not in parts[0]:
+            print(f"Error: invalid {DOWNLOAD_ENV} line: {line}", file=sys.stderr)
+            sys.exit(1)
+        key, value = parts[0].split("=", 1)
+        values[key] = value
+    return values
+
+
+def _env_path(paper_dir, value):
+    if os.path.isabs(value):
+        return value
+    return os.path.abspath(os.path.join(paper_dir, value))
+
+
+def paper_dir_compile_args(paper_dir):
+    paper_dir = os.path.abspath(os.path.expanduser(paper_dir))
+    values = _read_download_env(paper_dir)
+    missing = [key for key in ("WORK_DIR", "MAIN_TEX") if not values.get(key)]
+    if missing:
+        print(f"Error: {DOWNLOAD_ENV} missing required keys: {', '.join(missing)}", file=sys.stderr)
+        sys.exit(1)
+
+    work_dir = _env_path(paper_dir, values["WORK_DIR"])
+    main_tex = values["MAIN_TEX"]
+    pdf_path = values.get("PDF_PATH") or (os.path.basename(paper_dir) + ".pdf")
+    output_path = _env_path(paper_dir, pdf_path)
+    return work_dir, main_tex, output_path
 
 
 def _norm_relpath(path, root):
@@ -582,10 +634,15 @@ def compile_online(work_dir, main_tex, output_path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
+    if len(sys.argv) == 3 and sys.argv[1] == "paper":
+        work_dir_arg, main_tex_arg, output_path_arg = paper_dir_compile_args(sys.argv[2])
+        compile_online(work_dir_arg, main_tex_arg, output_path_arg)
+    elif len(sys.argv) == 4:
+        compile_online(sys.argv[1], sys.argv[2], sys.argv[3])
+    else:
         print(
-            "Usage: python compile.py <work_dir> <main_tex> <output_pdf_path>",
+            "Usage: python compile.py <work_dir> <main_tex> <output_pdf_path>\n"
+            "   or: python compile.py paper <paper_dir>",
             file=sys.stderr,
         )
         sys.exit(2)
-    compile_online(sys.argv[1], sys.argv[2], sys.argv[3])

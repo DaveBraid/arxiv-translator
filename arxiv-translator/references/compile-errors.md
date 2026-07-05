@@ -32,6 +32,16 @@
 **远端编译超时 / 变慢**
 → 检查工作目录里是否混入了历史产物（尤其是无关的 PDF、`.aux`、`.log`、旧输出文件）。这些文件会被一并上传，显著拖慢远端编译，甚至导致超时。
 
+**远端编译连续失败或触发限制**
+→ 远端编译最多尝试 2 次。若 2 次后仍失败，且本机有 Codex LaTeX 插件或 TeX Live/MacTeX，应切到本地编译，不要继续反复打远端服务。
+→ 本地也不可用时（既没有 LaTeX 插件，也没有 TeX Live/MacTeX），停止编译并告知用户缺少本地编译环境。
+→ 本地 LuaLaTeX 若提示 `Font "Noto Serif CJK SC" cannot be found`，优先改用本机可见字体的文件路径，例如 macOS 上的 `\setmainjfont[Path=/System/Library/Fonts/]{Hiragino Sans GB.ttc}`，并设置 `TEXMFVAR` / `TEXMFCACHE` 到可写临时目录。
+
+**云盘目录本地编译生成 PDF 但 latexmk 返回非零**
+→ 在 iCloud/CloudDrive 等同步目录中，`latexmk` 可能因旧 `.log` 时间戳、图片 md5 读取、`.fls`/`.fdb_latexmk` 写入异常返回非零，同时日志已经出现 `Output written on ...pdf`。
+→ 不要直接交付这种 PDF。先将当前源码、样式文件、`.bbl`/`.bib` 和被引用图片复制到 `/private/tmp` 等本地临时目录，排除历史 PDF、`.aux`、`.log`、`.out`、`.fls`、`.fdb_latexmk`、`.synctex.gz` 和时间戳备份，再在临时目录重新编译。
+→ 临时目录编译成功后，用 `pdfinfo` 检查页数和结构，并渲染首页确认中文字体、图片和版面正常，最后再把干净 PDF 复制回论文库的 `.zh.pdf` 路径。
+
 ## 读取错误日志
 
 编译失败时，服务端返回含完整日志的 JSON。找到以 `!` 开头的行定位致命错误：

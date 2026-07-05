@@ -22,6 +22,7 @@ import xml.etree.ElementTree as ET
 
 DOWNLOAD_ENV = "download.env"
 _INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"|?*]')
+_ABBREVIATION_COLON_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,}):\s*")
 _EMOJI_RE = re.compile(
     "["
     "\U0001F1E6-\U0001F1FF"
@@ -172,6 +173,7 @@ def pdf_name_from_title(title, fallback, max_len=240):
     s = " ".join(str(title).split())
     s = s.replace("\x00", "")
     s = s.replace("/", "-").replace("\\", "-")
+    s = _ABBREVIATION_COLON_RE.sub(r"【\1】", s)
     s = _INVALID_FILENAME_CHARS_RE.sub("_", s)
     s = _EMOJI_RE.sub("", s)
     s = " ".join(s.split())

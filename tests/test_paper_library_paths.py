@@ -35,6 +35,11 @@ class PaperLibraryPathTests(unittest.TestCase):
 
             self.assertEqual(Path(resolved).name, "2501.12948v2 - A-B_ Test Paper")
 
+    def test_pdf_name_replaces_abbreviation_colon_with_brackets(self):
+        pdf_name = download.pdf_name_from_title("RMA: Rapid Motor Adaptation", "fallback")
+
+        self.assertEqual(pdf_name, "【RMA】Rapid Motor Adaptation")
+
     def test_download_env_round_trip_uses_single_paper_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             paper_dir = Path(tmp) / "2501.12948v2 - Test Paper"

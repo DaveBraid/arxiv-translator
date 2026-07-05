@@ -43,6 +43,8 @@ python3 arxiv-translator/scripts/inspect_tex.py scan /tmp/arxiv-test main.tex bo
 
 Python 脚本使用 4 空格缩进，函数和变量采用 `snake_case`，常量采用全大写加下划线，如 `BEGIN_DOC_RE`。优先使用标准库；新增第三方依赖前需说明用途，并同步更新 README 的依赖说明。脚本应保留清晰的 CLI 用法、确定性的 stdout/stderr 输出，以及对失败场景的明确 `sys.exit`。
 
+遵循最小改动原则：只修改完成任务必需的内容；Skill 必须要点明确、逻辑清晰，不写废话，不长篇大论。
+
 ## 测试指南
 
 当前使用 Python `unittest`，暂无覆盖率门槛。修改脚本后至少运行 AST 语法检查和 `python3 -m unittest tests/test_paper_library_paths.py`，并在涉及下载、编译或 LaTeX 处理时用一个小型 arXiv ID 做 smoke test。涉及引用内联、中文字体注入时，应验证真实源码目录，而不只检查单个字符串。

@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 
 DOWNLOAD_ENV = "download.env"
 _INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"|?*]')
-_ABBREVIATION_COLON_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,}):\s*")
+_TITLE_PREFIX_COLON_RE = re.compile(r"^([A-Za-z][A-Za-z0-9]{1,39}):\s*")
 _EMOJI_RE = re.compile(
     "["
     "\U0001F1E6-\U0001F1FF"
@@ -173,7 +173,7 @@ def pdf_name_from_title(title, fallback, max_len=240):
     s = " ".join(str(title).split())
     s = s.replace("\x00", "")
     s = s.replace("/", "-").replace("\\", "-")
-    s = _ABBREVIATION_COLON_RE.sub(r"【\1】", s)
+    s = _TITLE_PREFIX_COLON_RE.sub(_format_title_prefix, s)
     s = _INVALID_FILENAME_CHARS_RE.sub("_", s)
     s = _EMOJI_RE.sub("", s)
     s = " ".join(s.split())
@@ -183,6 +183,13 @@ def pdf_name_from_title(title, fallback, max_len=240):
     if max_len and len(s) > max_len:
         s = s[:max_len].rstrip()
     return s
+
+
+def _format_title_prefix(match):
+    prefix = match.group(1)
+    if prefix.isupper() or any(ch.isupper() for ch in prefix[1:]) or any(ch.isdigit() for ch in prefix):
+        return f"【{prefix}】"
+    return match.group(0)
 
 
 def paper_dir_name(paper_id, pdf_name):

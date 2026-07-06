@@ -40,6 +40,19 @@ class PaperLibraryPathTests(unittest.TestCase):
 
         self.assertEqual(pdf_name, "【RMA】Rapid Motor Adaptation")
 
+    def test_pdf_name_replaces_camel_case_prefix_colon_with_brackets(self):
+        pdf_name = download.pdf_name_from_title(
+            "DayDreamer: World Models for Physical Robot Learning",
+            "fallback",
+        )
+
+        self.assertEqual(pdf_name, "【DayDreamer】World Models for Physical Robot Learning")
+
+    def test_pdf_name_keeps_plain_word_colon_as_sanitized_separator(self):
+        pdf_name = download.pdf_name_from_title("Understanding: A Survey", "fallback")
+
+        self.assertEqual(pdf_name, "Understanding_ A Survey")
+
     def test_download_env_round_trip_uses_single_paper_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             paper_dir = Path(tmp) / "2501.12948v2 - Test Paper"

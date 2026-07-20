@@ -16,6 +16,7 @@ def load_module(name, path):
 
 download = load_module("download", ROOT / "arxiv-translator" / "scripts" / "download.py")
 compile_script = load_module("compile_script", ROOT / "arxiv-translator" / "scripts" / "compile.py")
+cleanup_script = load_module("cleanup_script", ROOT / "arxiv-translator" / "scripts" / "cleanup.py")
 
 
 class PaperLibraryPathTests(unittest.TestCase):
@@ -72,6 +73,70 @@ class PaperLibraryPathTests(unittest.TestCase):
             self.assertEqual(Path(work_arg), work_dir)
             self.assertEqual(main_arg, "main.tex")
             self.assertEqual(Path(pdf_arg), paper_dir / "2501.12948v2 - Test Paper.pdf")
+
+    def test_cleanup_removes_managed_local_work_and_metadata_but_keeps_pdfs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paper_dir = Path(tmp) / "2501.12948v2 - Test Paper"
+            paper_dir.mkdir()
+            local_work = Path(download.create_local_work_dir("2501.12948v2"))
+            (local_work / "main.tex").write_text("translated", encoding="utf-8")
+            download.write_download_env(
+                str(paper_dir),
+                paper_id="2501.12948v2",
+                work_dir=str(local_work),
+                main_tex="main.tex",
+                pdf_name="Test Paper",
+                local_work_dir=str(local_work),
+            )
+            en_pdf = paper_dir / f"{paper_dir.name}.en.pdf"
+            zh_pdf = paper_dir / f"{paper_dir.name}.zh.pdf"
+            en_pdf.write_bytes(b"en")
+            zh_pdf.write_bytes(b"zh")
+
+            cleanup_script.cleanup(str(paper_dir))
+
+            self.assertFalse(local_work.exists())
+            self.assertFalse((paper_dir / "download.env").exists())
+            self.assertEqual(sorted(path.name for path in paper_dir.iterdir()), [en_pdf.name, zh_pdf.name])
+
+    def test_publish_moves_staged_pdf_to_final_zh_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paper_dir = Path(tmp) / "2501.12948v2 - Test Paper"
+            work_dir = paper_dir / ".tmp_arxiv" / "2501.12948v2"
+            work_dir.mkdir(parents=True)
+            download.write_download_env(
+                str(paper_dir),
+                paper_id="2501.12948v2",
+                work_dir=str(work_dir),
+                main_tex="main.tex",
+                pdf_name="Test Paper",
+            )
+            _, _, staged_pdf, final_pdf = compile_script.paper_dir_staged_compile_args(str(paper_dir))
+            Path(staged_pdf).write_bytes(b"%PDF-staged")
+
+            published = compile_script.publish_staged_pdf(str(paper_dir))
+
+            self.assertEqual(Path(published), Path(final_pdf))
+            self.assertEqual(Path(final_pdf).read_bytes(), b"%PDF-staged")
+
+    def test_cleanup_refuses_unmanaged_local_work_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paper_dir = Path(tmp) / "2501.12948v2 - Test Paper"
+            unmanaged = Path(tmp) / "unmanaged"
+            unmanaged.mkdir()
+            download.write_download_env(
+                str(paper_dir),
+                paper_id="2501.12948v2",
+                work_dir=str(unmanaged),
+                main_tex="main.tex",
+                pdf_name="Test Paper",
+                local_work_dir=str(unmanaged),
+            )
+
+            cleanup_script.cleanup(str(paper_dir))
+
+            self.assertTrue(unmanaged.exists())
+            self.assertTrue((paper_dir / "download.env").exists())
 
 
 if __name__ == "__main__":

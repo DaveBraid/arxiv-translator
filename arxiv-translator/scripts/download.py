@@ -4,6 +4,7 @@ Download arXiv e-print, extract, pick main .tex, fetch paper title (PDF basename
 Usage:
   python download.py <paper_id> <work_dir>
   python download.py --library-dir <library_dir> <paper_id>
+  python download.py --library-dir <library_dir> --local-work-copy <paper_id>
 
 stdout: shell assignments including WORK_DIR, MAIN_TEX, PDF_NAME, and
 library-mode PAPER_DIR/PDF_PATH.
@@ -15,12 +16,14 @@ import re
 import shutil
 import sys
 import tarfile
+import tempfile
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
 
 DOWNLOAD_ENV = "download.env"
+LOCAL_WORK_MARKER = ".arxiv-translator-local-work"
 _INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"|?*]')
 _TITLE_PREFIX_COLON_RE = re.compile(r"^([A-Za-z][A-Za-z0-9]{1,39}):\s*")
 _EMOJI_RE = re.compile(
@@ -226,7 +229,7 @@ def _path_for_env(path, paper_dir):
     return rel
 
 
-def write_download_env(paper_dir, paper_id, work_dir, main_tex, pdf_name):
+def write_download_env(paper_dir, paper_id, work_dir, main_tex, pdf_name, local_work_dir=None):
     """Persist per-paper metadata so later commands can target only this folder."""
     os.makedirs(paper_dir, exist_ok=True)
     pdf_path = os.path.join(paper_dir, os.path.basename(os.path.abspath(paper_dir)) + ".pdf")
@@ -238,6 +241,8 @@ def write_download_env(paper_dir, paper_id, work_dir, main_tex, pdf_name):
         _sh_var_assign("PDF_NAME", pdf_name),
         _sh_var_assign("PDF_PATH", _path_for_env(pdf_path, paper_dir)),
     ]
+    if local_work_dir:
+        lines.append(_sh_var_assign("LOCAL_WORK_DIR", os.path.abspath(local_work_dir)))
     with open(env_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return env_path
@@ -267,12 +272,36 @@ def _download_to_work_dir(paper_id, work_dir):
     return rel_path, pdf_name
 
 
-def _download_to_library(paper_id, library_dir):
+def create_local_work_dir(paper_id):
+    safe_id = re.sub(r"[^A-Za-z0-9._-]", "_", paper_id)
+    work_dir = tempfile.mkdtemp(prefix=f"arxiv-translator-{safe_id}-")
+    with open(os.path.join(work_dir, LOCAL_WORK_MARKER), "w", encoding="utf-8") as f:
+        f.write(f"PAPER_ID={paper_id}\n")
+    return work_dir
+
+
+def _download_to_library(paper_id, library_dir, local_work_copy=False):
     pdf_name = pdf_name_from_title(fetch_arxiv_title(paper_id), paper_id)
     paper_dir = resolve_paper_dir(library_dir, paper_id, pdf_name)
-    work_dir = os.path.join(paper_dir, ".tmp_arxiv", paper_id)
-    main_tex, pdf_name = _download_to_work_dir(paper_id, work_dir)
-    env_path = write_download_env(paper_dir, paper_id, work_dir, main_tex, pdf_name)
+    work_dir = (
+        create_local_work_dir(paper_id)
+        if local_work_copy
+        else os.path.join(paper_dir, ".tmp_arxiv", paper_id)
+    )
+    try:
+        main_tex, pdf_name = _download_to_work_dir(paper_id, work_dir)
+    except SystemExit:
+        if local_work_copy:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        raise
+    env_path = write_download_env(
+        paper_dir,
+        paper_id,
+        work_dir,
+        main_tex,
+        pdf_name,
+        local_work_dir=work_dir if local_work_copy else None,
+    )
     pdf_path = os.path.join(paper_dir, os.path.basename(os.path.abspath(paper_dir)) + ".pdf")
     return paper_dir, work_dir, main_tex, pdf_name, pdf_path, env_path
 
@@ -290,9 +319,18 @@ def main(argv):
         _print_download_vars(work_dir, main_tex, pdf_name, paper_dir, pdf_path)
         return 0
 
+    if len(argv) == 4 and argv[0] == "--library-dir" and argv[2] == "--local-work-copy":
+        library_dir, paper_id = argv[1], argv[3]
+        paper_dir, work_dir, main_tex, pdf_name, pdf_path, _ = _download_to_library(
+            paper_id, library_dir, local_work_copy=True
+        )
+        _print_download_vars(work_dir, main_tex, pdf_name, paper_dir, pdf_path)
+        return 0
+
     print(
         "Usage: python download.py <paper_id> <work_dir>\n"
-        "   or: python download.py --library-dir <library_dir> <paper_id>",
+        "   or: python download.py --library-dir <library_dir> <paper_id>\n"
+        "   or: python download.py --library-dir <library_dir> --local-work-copy <paper_id>",
         file=sys.stderr,
     )
     return 2

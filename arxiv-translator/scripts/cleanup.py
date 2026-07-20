@@ -1,22 +1,58 @@
 #!/usr/bin/env python3
 """
-Remove the .tmp_arxiv working directory.
-Usage: python cleanup.py <base_dir> [backup_dir]
+Remove temporary files for one paper.
+Usage: python cleanup.py <base_dir>
 
-Removes <base_dir>/.tmp_arxiv entirely and deletes temporary
-inspect_*.txt files created under <base_dir>.
-If backup_dir is provided, translated .tex and .bbl files are copied there
-before the working directory is removed.
+Removes <base_dir>/.tmp_arxiv, a managed LOCAL_WORK_DIR recorded in
+download.env, download.env itself, and inspect_*.txt files.
 Call this only after all papers have been compiled.
 """
 import os
 import re
+import shlex
 import shutil
 import sys
+import tempfile
 
 
 INSPECT_OUTPUT_RE = re.compile(r"^inspect_.*\.txt$")
-BACKUP_EXTS = {".tex", ".bbl"}
+DOWNLOAD_ENV = "download.env"
+LOCAL_WORK_MARKER = ".arxiv-translator-local-work"
+
+
+def read_download_env(base_dir):
+    env_path = os.path.join(base_dir, DOWNLOAD_ENV)
+    values = {}
+    if not os.path.isfile(env_path):
+        return values
+    with open(env_path, "r", encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = shlex.split(line, posix=True)
+            if len(parts) == 1 and "=" in parts[0]:
+                key, value = parts[0].split("=", 1)
+                values[key] = value
+    return values
+
+
+def remove_local_work_dir(path):
+    if not path:
+        return False
+    target = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
+    temp_root = os.path.realpath(tempfile.gettempdir())
+    try:
+        inside_temp = os.path.commonpath((target, temp_root)) == temp_root
+    except ValueError:
+        inside_temp = False
+    marker = os.path.join(target, LOCAL_WORK_MARKER)
+    if not inside_temp or not os.path.isfile(marker):
+        print(f"Skipped unmanaged LOCAL_WORK_DIR: {target}", file=sys.stderr)
+        return False
+    shutil.rmtree(target)
+    print(f"✅ Removed: {target}")
+    return True
 
 
 def remove_inspect_outputs(base_dir):
@@ -32,35 +68,11 @@ def remove_inspect_outputs(base_dir):
     return removed
 
 
-def backup_translated_sources(tmp_dir, backup_dir):
-    copied = []
-    if not backup_dir:
-        return copied
-    if not os.path.exists(tmp_dir):
-        return copied
-
-    backup_dir = os.path.abspath(backup_dir)
-    os.makedirs(backup_dir, exist_ok=True)
-    for root, _, files in os.walk(tmp_dir):
-        for fname in files:
-            if os.path.splitext(fname)[1].lower() not in BACKUP_EXTS:
-                continue
-            src = os.path.join(root, fname)
-            rel = os.path.relpath(src, tmp_dir)
-            dst = os.path.join(backup_dir, rel)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
-            copied.append(dst)
-    return copied
-
-
-def cleanup(base_dir, backup_dir=None):
+def cleanup(base_dir):
     base_dir = os.path.abspath(base_dir)
+    env_path = os.path.join(base_dir, DOWNLOAD_ENV)
+    env_values = read_download_env(base_dir)
     target = os.path.join(base_dir, ".tmp_arxiv")
-    copied_sources = backup_translated_sources(target, backup_dir)
-    if copied_sources:
-        print(f"✅ Backed up translated sources: {os.path.abspath(backup_dir)}")
-
     if os.path.exists(target):
         shutil.rmtree(target)
         print(f"✅ Removed: {target}")
@@ -74,9 +86,20 @@ def cleanup(base_dir, backup_dir=None):
     else:
         print(f"Nothing to remove: {base_dir}/inspect_*.txt")
 
+    local_work_dir = env_values.get("LOCAL_WORK_DIR")
+    local_removed = remove_local_work_dir(local_work_dir)
+    local_cleanup_complete = (
+        not local_work_dir
+        or local_removed
+        or not os.path.exists(os.path.abspath(os.path.expanduser(local_work_dir)))
+    )
+    if local_cleanup_complete and os.path.isfile(env_path):
+        os.remove(env_path)
+        print(f"✅ Removed: {env_path}")
+
 
 if __name__ == "__main__":
-    if len(sys.argv) not in (2, 3):
-        print("Usage: python cleanup.py <base_dir> [backup_dir]", file=sys.stderr)
+    if len(sys.argv) != 2:
+        print("Usage: python cleanup.py <base_dir>", file=sys.stderr)
         sys.exit(2)
-    cleanup(sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else None)
+    cleanup(sys.argv[1])

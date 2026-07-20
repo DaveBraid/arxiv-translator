@@ -4,6 +4,7 @@ Submit a LaTeX project to latex-on-http for compilation.
 Usage:
   python compile.py <work_dir> <main_tex> <output_pdf_path>
   python compile.py paper <paper_dir>
+  python compile.py publish <paper_dir>
 
 main_tex: path relative to work_dir (e.g. ms.tex), or absolute path to the main file.
 output_pdf_path: full path for the output PDF; if an existing directory is passed, write <main_basename>.pdf there.
@@ -12,7 +13,9 @@ import base64
 import os
 import re
 import shlex
+import shutil
 import sys
+import tempfile
 
 import requests
 
@@ -64,7 +67,7 @@ _BUILD_ARTIFACT_EXTS = (
     ".ps",
 )
 DOWNLOAD_ENV = "download.env"
-_SKIP_FILENAMES = {DOWNLOAD_ENV}
+_SKIP_FILENAMES = {DOWNLOAD_ENV, ".arxiv-translator-local-work"}
 _INLINED_BBL_MARKER = "% arxiv-translator: inlined prebuilt .bbl"
 _AUTO_CJK_PREAMBLE = "\n".join(
     (
@@ -141,6 +144,35 @@ def paper_dir_compile_args(paper_dir):
     pdf_path = values.get("PDF_PATH") or (os.path.basename(paper_dir) + ".pdf")
     output_path = _env_path(paper_dir, pdf_path)
     return work_dir, main_tex, output_path
+
+
+def paper_dir_staged_compile_args(paper_dir):
+    paper_dir = os.path.abspath(os.path.expanduser(paper_dir))
+    work_dir, main_tex, _ = paper_dir_compile_args(paper_dir)
+    staged_path = os.path.join(work_dir, ".arxiv-translator-staged.zh.pdf")
+    final_path = os.path.join(paper_dir, os.path.basename(paper_dir) + ".zh.pdf")
+    return work_dir, main_tex, staged_path, final_path
+
+
+def publish_staged_pdf(paper_dir):
+    _, _, staged_path, final_path = paper_dir_staged_compile_args(paper_dir)
+    if not os.path.isfile(staged_path):
+        print(f"Error: staged PDF not found: {staged_path}", file=sys.stderr)
+        sys.exit(1)
+    fd, temp_path = tempfile.mkstemp(
+        prefix=".arxiv-translator-publish-",
+        suffix=".pdf",
+        dir=os.path.dirname(final_path),
+    )
+    os.close(fd)
+    try:
+        shutil.copyfile(staged_path, temp_path)
+        os.replace(temp_path, final_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    print(f"✅ Published PDF: {final_path}")
+    return final_path
 
 
 def _norm_relpath(path, root):
@@ -635,14 +667,21 @@ def compile_online(work_dir, main_tex, output_path):
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "paper":
-        work_dir_arg, main_tex_arg, output_path_arg = paper_dir_compile_args(sys.argv[2])
+        work_dir_arg, main_tex_arg, output_path_arg, final_path_arg = paper_dir_staged_compile_args(
+            sys.argv[2]
+        )
         compile_online(work_dir_arg, main_tex_arg, output_path_arg)
+        print(f"STAGED_PDF={output_path_arg}")
+        print(f"FINAL_PDF={final_path_arg}")
+    elif len(sys.argv) == 3 and sys.argv[1] == "publish":
+        publish_staged_pdf(sys.argv[2])
     elif len(sys.argv) == 4:
         compile_online(sys.argv[1], sys.argv[2], sys.argv[3])
     else:
         print(
             "Usage: python compile.py <work_dir> <main_tex> <output_pdf_path>\n"
-            "   or: python compile.py paper <paper_dir>",
+            "   or: python compile.py paper <paper_dir>\n"
+            "   or: python compile.py publish <paper_dir>",
             file=sys.stderr,
         )
         sys.exit(2)
